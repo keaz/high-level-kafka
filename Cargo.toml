@@ -1,11 +1,11 @@
 [package]
 name = "high-level-kafka"
 authors = ["Kasun Ranasingge <kasunranasinghe303@gmail.com>"]
-description = "Simple Kafka client for Rust"
+description = "High Level Kafka client for Rust"
 license = "MIT/Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/keaz/high-level-kafka"
-keywords = ["kafka", "client", "rdkafka", "async","simple"]
+keywords = ["kafka", "client", "rdkafka", "async","high-level"]
 version = "0.0.1"
 edition = "2021"
 
