@@ -163,7 +163,7 @@ where
         }
     }
 
-    ///
+    /// FIXME: Not ready yet
     /// Add message handles to the cosnumer
     /// Currently only support one handler.
     /// 
@@ -187,11 +187,11 @@ where
     /// consumer.add("topic_1".to_string(), handler_1);
     /// consumer.subscribe().await;
     /// ```
-    pub fn add(&mut self, topic: String, handler: Box<dyn Fn(T,Metadata) -> F>) {
+    fn add(&mut self, topic: String, handler: Box<dyn Fn(T,Metadata) -> F>) {
         self.topics_map.insert(topic, handler);
     }
 
-    ///
+    /// FIXME: Not ready yet
     /// Subcribes to given set of topics and calls the given function for each message
     /// 
     /// # Example
@@ -210,7 +210,7 @@ where
     /// consumer.add("topic_1".to_string(), handler_1);
     /// consumer.subscribe().await;
     /// ```
-    pub async fn subscribe(&self) {
+    async fn subscribe(&self) {
         let topics = self.topics_map.keys().map(|key| {
             key.as_str()
         }).collect::<Vec<&str>>();
@@ -239,6 +239,57 @@ where
         }
     }
 
+
+    ///
+    /// Subscribe to a given topic and calls the given function for each message
+    /// 
+    /// # Arguments
+    /// * `topic` - The topic to subscribe to
+    /// * `handler` - The handler function that will be called for each message for the give `topic`
+    /// 
+    /// # Example
+    /// ```
+    /// use simple_kafka::{Consumer};
+    /// #[derive(Serialize, Deserialize, Debug)]
+    ///  struct Data {
+    ///     attra_one: String,
+    ///     attra_two: i8,
+    /// }
+    /// 
+    /// let consumer = Consumer::from("group_id", "localhost:9092");
+    /// let handler_1 = Box::new(| data: Data, metadata: Metadata| async move {
+    ///     println!("Handler One ::: data: {:?}, metadata: {:?}", data, metadata);
+    /// });
+    /// consumer.add("topic_1".to_string(), handler_1);
+    /// consumer.subscribe().await;
+    /// ```
+    pub async fn subscribe_to_topic(&mut self,topic: String, handler: impl Fn(T, Metadata) -> F) {
+        self.consumer
+            .subscribe(&[topic.as_str()])
+            .expect("Can't subscribe to specified topic");
+        
+        loop {
+
+            let is_runnig = self.is_runnig.lock().await;
+            debug!("Subscriber is running: {:?}", *is_runnig);
+            if !(*is_runnig) {
+                debug!("Subscriber is stopped");
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                continue;
+            }
+
+            match self.consumer.recv().await {
+                Ok(message) => {
+                    let owned_message = message.detach();
+                    single_handle_message(owned_message, &handler).await;
+                }
+                Err(error) => {
+                    handle_error(error).await
+                }
+            };
+        }
+    }
+    
     ///
     /// Pause the consumer. Consumer will not be disconnect, will not request new messages
     /// 
@@ -331,7 +382,7 @@ where
         }
     }
 
-    ///
+    /// FIXME: Not ready yet
     /// Add message handles to the cosnumer
     /// Currently only support one handler.
     /// 
@@ -355,11 +406,11 @@ where
     /// consumer.add("topic_1".to_string(), handler_1);
     /// consumer.subscribe().await;
     /// ```
-    pub fn add(&mut self, topic: String, handler: Box<dyn Fn(T,Metadata) -> F>) {
+    fn add(&mut self, topic: String, handler: Box<dyn Fn(T,Metadata) -> F>) {
         self.topics_map.insert(topic, handler);
     }
 
-    ///
+    /// FIXME: Not ready yet
     /// Subcribes to given set of topics and calls the given function for each message
     /// 
     /// # Example
@@ -378,7 +429,7 @@ where
     /// consumer.add("topic_1".to_string(), handler_1);
     /// consumer.subscribe().await;
     /// ```
-    pub async fn subscribe(&self) {
+    async fn subscribe(&self) {
         let topics = self.topics_map.keys().map(|key| {
             key.as_str()
         }).collect::<Vec<&str>>();
@@ -415,25 +466,22 @@ where
     ///     attra_two: i8,
     /// }
     /// 
-    /// let consumer = Consumer::from("group_id", "localhost:9092");
-    /// let handler_1 = Box::new(| data: Data, metadata: Metadata| async move {
-    ///     println!("Handler One ::: data: {:?}, metadata: {:?}", data, metadata);
-    /// });
-    /// consumer.add("topic_1".to_string(), handler_1);
-    /// consumer.subscribe().await;
+    /// let mut consumer = Consumer::from("group_id", "localhost:9092");
+    /// let handler = consumer.subscribe_to_topic("topic".to_string(), Box::new(|data: Data, medatad: Metadata| async move {
+    ///    info!("data: {:?}, metadata: {:?}", data, medatad);
+    /// }));
+    /// handler.await;
     /// ```
     pub async fn subscribe_to_topic(&mut self,topic: String, handler: impl Fn(T, Metadata) -> F) {
         self.consumer
             .subscribe(&[topic.as_str()])
             .expect("Can't subscribe to specified topic");
         
-        let _inserted = &self.topics_map.insert(topic, handler);
-
         loop {
             match self.consumer.recv().await {
                 Ok(message) => {
                     let owned_message = message.detach();
-                    handle_message(owned_message, &self.topics_map).await;
+                    single_handle_message(owned_message, &handler).await;
                 }
                 Err(error) => {
                     handle_error(error).await
@@ -451,6 +499,28 @@ async fn handle_message<F,T>(owned_message: OwnedMessage, topics_map: &HashMap<S
         let payload = owned_message.payload().unwrap();
         let topic = owned_message.topic().to_string();
         let handler =  topics_map.get(topic.as_str()).unwrap();
+        let partition = owned_message.partition();
+        let offset = owned_message.offset();
+        let headers = extract_headers(&owned_message);
+
+        let metadata = Metadata {
+            topic,
+            partition,
+            offset,
+            headers,
+        };
+        let message = String::from_utf8_lossy(payload);
+        let message: T = serde_json::from_str(&message).unwrap();
+        handler(message, metadata).await;
+    }
+
+    async fn single_handle_message<F,T>(owned_message: OwnedMessage, handler: &impl Fn(T, Metadata) -> F) 
+    where
+    F: Future<Output = ()> + Send + Sync + 'static,
+    T: for<'a> serde::Deserialize<'a>,
+    {
+        let payload = owned_message.payload().unwrap();
+        let topic = owned_message.topic().to_string();
         let partition = owned_message.partition();
         let offset = owned_message.offset();
         let headers = extract_headers(&owned_message);
@@ -515,19 +585,10 @@ mod tests {
     async fn create_consumer_test() {
 
         let mut consumer = Consumer::from("group_id", "localhost:9092");
-        
-        let handler_1 = Box::new(| data: Data, metadata: Metadata| async move {
-            println!("Handler One ::: data: {:?}, metadata: {:?}", data, metadata);
-        });
-
-        let x = Arc::new(handler_1);
-
-        
-        let shared_consumer = Arc::new(consumer);
-        shared_consumer.subscribe_to_topic("topic".to_string(), Box::new(|data: Data, medatad: Metadata| async move {
-            
+        let handler = consumer.subscribe_to_topic("topic".to_string(), Box::new(|data: Data, medatad: Metadata| async move {
+            info!("data: {:?}, metadata: {:?}", data, medatad);
         }));
-        // consumer.subscribe().await;
+        handler.await;
     }
 
     #[tokio::test]

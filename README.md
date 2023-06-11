@@ -1,4 +1,4 @@
-# Simple Kafka client library for Rust
+# A High Level Kafka client library for Rust
 
 A ldap client library that wraps [rdkafka](https://github.com/fede1024/rust-rdkafka) to make it easy to use. 
 Message parsing is done with [serde](https://github.com/serde-rs/serde).
@@ -9,7 +9,7 @@ Currently this is in early beta stage. Library only support use asynchronously.
 
 ## Usage
 ```
-cargo add simple-kafka
+cargo add high-level-kafka
 ```
 
 
@@ -48,12 +48,10 @@ struct Data {
 async fn main() -> Result<()>{
 
     let mut consumer = Consumer::from("group_id", "localhost:9092");
-    let handler_1 = Box::new(| data: Data, metadata: Metadata| async move {
-        println!("Handler One ::: data: {:?}, metadata: {:?}", data, metadata);
-    });
-    
-    consumer.add("topic_1".to_string(), handler_1);
-    consumer.subscribe().await;
+    let handler = consumer.subscribe_to_topic("topic".to_string(), Box::new(|data: Data, medatad: Metadata| async move {
+        info!("data: {:?}, metadata: {:?}", data, medatad);
+    }));
+    handler.await;
     Ok(())
 }
 
@@ -65,18 +63,16 @@ struct Data {
 ```
 
 ### PausableConsumer
+
+This consumer can be paused and resumed. It is useful when you want to pause the consumer for a while and then resume it.
+Note:: This is not production ready (version 0.0.1).
 ```rust
 #[tokio::main]
 async fn main() -> Result<()>{
 
     let mut consumer = PausableConsumer::from("group_id", "localhost:9092");
-    let handler_1 = Box::new(| data: Data, metadata: Metadata| async move {
-        println!("Handler One ::: data: {:?}, metadata: {:?}", data, metadata);
-    });
-    
     consumer.add("topic_1".to_string(), handler_1);
 
-    
     consumer.subscribe().await;
     Ok(())
 }

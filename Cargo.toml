@@ -1,12 +1,12 @@
 [package]
-name = "simple-kafka"
+name = "high-level-kafka"
 authors = ["Kasun Ranasingge <kasunranasinghe303@gmail.com>"]
 description = "Simple Kafka client for Rust"
 license = "MIT/Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/keaz/simple-kafka"
+repository = "https://github.com/keaz/high-level-kafka"
 keywords = ["kafka", "client", "rdkafka", "async","simple"]
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
