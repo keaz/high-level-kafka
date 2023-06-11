@@ -1,5 +1,3 @@
-
-
 pub mod consumer;
 pub mod publisher;
 
@@ -11,4 +9,3 @@ pub enum SimpleKafkaError {
     KafkaError(rdkafka::error::KafkaError),
     SerdeError(serde_json::Error),
 }
-

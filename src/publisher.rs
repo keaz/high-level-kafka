@@ -1,16 +1,18 @@
-use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration, hash::Hash, ops::ControlFlow};
+use std::{
+    collections::HashMap, fmt::Debug, hash::Hash, ops::ControlFlow, sync::Arc, time::Duration,
+};
 
 use futures::Future;
 use log::{debug, error, info};
 use rdkafka::{
     consumer::{Consumer as KafkaConsumer, StreamConsumer},
-    message::{Header as KafkaHeader, Headers, OwnedHeaders, BorrowedMessage, OwnedMessage},
+    error::KafkaError,
+    message::{BorrowedMessage, Header as KafkaHeader, Headers, OwnedHeaders, OwnedMessage},
     producer::{FutureProducer, FutureRecord},
-    ClientConfig, Message as KafkaMessage, error::KafkaError,
+    ClientConfig, Message as KafkaMessage,
 };
 
 use crate::SimpleKafkaError;
-
 
 #[derive(Debug)]
 pub struct Message<T: serde::Serialize + Debug> {
@@ -20,9 +22,7 @@ pub struct Message<T: serde::Serialize + Debug> {
     key: String,
 }
 
-
-impl <T: serde::Serialize + Debug> Message<T> {
-
+impl<T: serde::Serialize + Debug> Message<T> {
     ///
     /// Creates a new Message struct
     /// # Arguments
@@ -30,7 +30,7 @@ impl <T: serde::Serialize + Debug> Message<T> {
     /// * `headers` - A HashMap that holds the headers that should be published with the message
     /// * `data` - A generic type that holds the data that should be published, data should be serializable
     /// * `key` - A key that should be used to publish the message
-    /// 
+    ///
     pub fn new(topic: String, headers: HashMap<String, String>, data: T, key: String) -> Self {
         Message {
             topic,
@@ -39,27 +39,26 @@ impl <T: serde::Serialize + Debug> Message<T> {
             key,
         }
     }
-} 
+}
 
 ///
 /// A Producer that can be use to publish messages to kafka
-/// 
+///
 struct KafkaProducer {
     producer: FutureProducer,
     duration_secs: Duration,
 }
 
 impl KafkaProducer {
-
     ///
     /// Creates a KakfkaProducer from a bootstrap_servers string
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `bootstrap_servers` - Comma separated bootstrap servers
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```
     /// use simple_kafka::KafkaProducer;
     ///
@@ -80,12 +79,12 @@ impl KafkaProducer {
 
     ///
     /// Publishes a message to a topic
-    /// 
+    ///
     /// # Arguments
     /// * `message` - A Message struct that holds the topic, headers, data and key
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```
     /// use simple_kafka::{KafkaProducer, Message};
     /// #[derive(Serialize, Deserialize, Debug)]
@@ -93,7 +92,7 @@ impl KafkaProducer {
     ///     attra_one: String,
     ///     attra_two: i8,
     /// }
-    /// 
+    ///
     /// let producer = KafkaProducer::from("localhost:9092");
     /// let data  = Data {
     ///     attra_one: "123".to_string(),
@@ -138,17 +137,16 @@ impl KafkaProducer {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use serde::{Serialize, Deserialize};
+    use serde::{Deserialize, Serialize};
 
     use super::*;
 
     #[tokio::test]
-    async fn publish_message_test(){
+    async fn publish_message_test() {
         let publisher = KafkaProducer::from("localhost:9092");
-        let data  = Data {
+        let data = Data {
             attra_one: "123".to_string(),
             attra_two: 12,
         };
@@ -160,7 +158,6 @@ mod tests {
         let data = Message::new("topic".to_string(), headers, data, "key".to_string());
         let result = publisher.produce(data).await;
         assert!(result.is_ok());
-
     }
 
     #[derive(Serialize, Deserialize, Debug)]
