@@ -44,7 +44,7 @@ impl<T: serde::Serialize + Debug> Message<T> {
 ///
 /// A Producer that can be use to publish messages to kafka
 ///
-struct KafkaProducer {
+pub struct KafkaProducer {
     producer: FutureProducer,
     duration_secs: Duration,
 }
