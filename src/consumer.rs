@@ -1,14 +1,11 @@
-use std::{
-    collections::HashMap, fmt::Debug, hash::Hash, ops::ControlFlow, sync::Arc, time::Duration,
-};
+use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
 
 use futures::Future;
-use log::{debug, error, info};
+use log::{debug, error};
 use rdkafka::{
     consumer::{Consumer as KafkaConsumer, StreamConsumer},
     error::KafkaError,
-    message::{BorrowedMessage, Header as KafkaHeader, Headers, OwnedHeaders, OwnedMessage},
-    producer::{FutureProducer, FutureRecord},
+    message::{Headers, OwnedMessage},
     ClientConfig, Message as KafkaMessage,
 };
 use tokio::sync::Mutex;
@@ -262,13 +259,16 @@ where
     /// }
     ///
     /// let consumer = Consumer::from("group_id", "localhost:9092");
-    /// let handler_1 = Box::new(| data: Data, metadata: Metadata| async move {
+    /// let handler_1 = | data: Data, metadata: Metadata| async move {
     ///     println!("Handler One ::: data: {:?}, metadata: {:?}", data, metadata);
-    /// });
+    /// };
     /// consumer.add("topic_1".to_string(), handler_1);
     /// consumer.subscribe().await;
     /// ```
-    pub async fn subscribe_to_topic(&mut self, topic: String, handler: impl Fn(T, Metadata) -> F) {
+    pub async fn subscribe_to_topic<H>(&mut self, topic: String, handler: H)
+    where
+        H: Fn(T, Metadata) -> F,
+    {
         self.consumer
             .subscribe(&[topic.as_str()])
             .expect("Can't subscribe to specified topic");
@@ -467,12 +467,15 @@ where
     /// }
     ///
     /// let mut consumer = Consumer::from("group_id", "localhost:9092");
-    /// let handler = consumer.subscribe_to_topic("topic".to_string(), Box::new(|data: Data, medatad: Metadata| async move {
+    /// let handler = consumer.subscribe_to_topic("topic".to_string(), |data: Data, medatad: Metadata| async move {
     ///    info!("data: {:?}, metadata: {:?}", data, medatad);
-    /// }));
+    /// });
     /// handler.await;
     /// ```
-    pub async fn subscribe_to_topic(&mut self, topic: String, handler: impl Fn(T, Metadata) -> F) {
+    pub async fn subscribe_to_topic<H>(&mut self, topic: String, handler: H)
+    where
+        H: Fn(T, Metadata) -> F,
+    {
         self.consumer
             .subscribe(&[topic.as_str()])
             .expect("Can't subscribe to specified topic");
@@ -577,6 +580,7 @@ fn extract_headers(owned_message: &rdkafka::message::OwnedMessage) -> HashMap<St
 
 #[cfg(test)]
 mod tests {
+    use log::info;
     use serde::{Deserialize, Serialize};
 
     use super::*;
@@ -586,9 +590,9 @@ mod tests {
         let mut consumer = Consumer::from("group_id", "localhost:9092");
         let handler = consumer.subscribe_to_topic(
             "topic".to_string(),
-            Box::new(|data: Data, medatad: Metadata| async move {
+            |data: Data, medatad: Metadata| async move {
                 info!("data: {:?}, metadata: {:?}", data, medatad);
-            }),
+            },
         );
         handler.await;
     }

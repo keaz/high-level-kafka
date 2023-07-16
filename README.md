@@ -52,9 +52,9 @@ async fn main() -> Result<()>{
     let mut con = mut_consumer.clone().lock_owned().await;
     con.subscribe_to_topic(
         "topic".to_string(),
-        Box::new(|data: Data, medatad: Metadata| async move {
+        |data: Data, medatad: Metadata| async move {
             info!("data: {:?}, metadata: {:?}", data, medatad);
-        }),
+        },
     )
     .await;
 }

@@ -1,15 +1,10 @@
-use std::{
-    collections::HashMap, fmt::Debug, hash::Hash, ops::ControlFlow, sync::Arc, time::Duration,
-};
+use std::{collections::HashMap, fmt::Debug, time::Duration};
 
-use futures::Future;
-use log::{debug, error, info};
+use log::error;
 use rdkafka::{
-    consumer::{Consumer as KafkaConsumer, StreamConsumer},
-    error::KafkaError,
-    message::{BorrowedMessage, Header as KafkaHeader, Headers, OwnedHeaders, OwnedMessage},
+    message::{Header as KafkaHeader, OwnedHeaders},
     producer::{FutureProducer, FutureRecord},
-    ClientConfig, Message as KafkaMessage,
+    ClientConfig,
 };
 
 use crate::SimpleKafkaError;
