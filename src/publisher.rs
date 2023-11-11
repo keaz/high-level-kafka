@@ -39,6 +39,7 @@ impl<T: serde::Serialize + Debug> Message<T> {
 ///
 /// A Producer that can be use to publish messages to kafka
 ///
+///
 pub struct KafkaProducer {
     producer: FutureProducer,
     duration_secs: Duration,
@@ -49,27 +50,34 @@ impl KafkaProducer {
     /// Creates a KakfkaProducer from a bootstrap_servers string
     ///
     /// # Arguments
-    ///
     /// * `bootstrap_servers` - Comma separated bootstrap servers
+    ///
+    /// # Returns
+    /// * `KafkaProducer` - A KafkaProducer that can be used to publish messages to kafka
     ///
     /// # Example
     ///
     /// ```
     /// use simple_kafka::KafkaProducer;
     ///
-    /// let producer = KafkaProducer::from("localhost:9092");
+    /// let producer = KafkaProducer::from("localhost:9092").unwrap();
     /// ```
-    pub fn from(bootstrap_servers: &str) -> Self {
-        let producer: FutureProducer = ClientConfig::new()
+    pub fn from(bootstrap_servers: &str) -> Result<Self, SimpleKafkaError> {
+        let producer = ClientConfig::new()
             .set("bootstrap.servers", bootstrap_servers)
             .set("message.timeout.ms", "5000")
-            .create()
-            .expect("Producer creation error");
+            .create::<FutureProducer>();
 
-        KafkaProducer {
+        if let Err(error) = producer {
+            return Err(SimpleKafkaError::KafkaError(error));
+        }
+
+        let producer = producer.unwrap();
+
+        Ok(KafkaProducer {
             producer,
             duration_secs: Duration::from_secs(10),
-        }
+        })
     }
 
     ///
@@ -88,7 +96,7 @@ impl KafkaProducer {
     ///     attra_two: i8,
     /// }
     ///
-    /// let producer = KafkaProducer::from("localhost:9092");
+    /// let producer = KafkaProducer::from("localhost:9092").unwrap();
     /// let data  = Data {
     ///     attra_one: "123".to_string(),
     ///     attra_two: 12,
@@ -140,7 +148,7 @@ mod tests {
 
     #[tokio::test]
     async fn publish_message_test() {
-        let publisher = KafkaProducer::from("localhost:9092");
+        let publisher = KafkaProducer::from("localhost:9092").unwrap();
         let data = Data {
             attra_one: "123".to_string(),
             attra_two: 12,

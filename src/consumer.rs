@@ -10,6 +10,8 @@ use rdkafka::{
 };
 use tokio::sync::Mutex;
 
+use crate::SimpleKafkaError;
+
 ///
 /// A Consumer that can be used to consume messages from kafka and has the ability to pause and resume
 ///
@@ -38,15 +40,16 @@ where
 ///
 /// Configuration options for Consumers
 ///
-pub struct ConsumerOptiopns {
+pub struct ConsumerOptiopns<'a> {
     bootstrap_servers: String,
     group_id: String,
     session_timeout_ms: String,
     enable_auto_commit: bool,
     enable_partition_eof: bool,
+    other_options: HashMap<&'a str, &'a str>,
 }
 
-impl ConsumerOptiopns {
+impl<'a> ConsumerOptiopns<'a> {
     ///
     /// Creates a new ConsumerOptiopns
     /// # Arguments
@@ -68,6 +71,7 @@ impl ConsumerOptiopns {
         session_timeout_ms: String,
         enable_auto_commit: bool,
         enable_partition_eof: bool,
+        other_options: HashMap<&'a str, &'a str>,
     ) -> Self {
         ConsumerOptiopns {
             bootstrap_servers,
@@ -75,6 +79,7 @@ impl ConsumerOptiopns {
             session_timeout_ms,
             enable_auto_commit,
             enable_partition_eof,
+            other_options,
         }
     }
 }
@@ -101,32 +106,49 @@ where
     /// * `group_id` - The group_id of the consumer
     /// * `bootstrap_servers` - The comma separated bootstrap servers
     ///
+    /// # Returns
+    /// A tuple of PausableConsumer and a Arc<Mutex<bool>>. The Arc<Mutex<bool>> is used to pause and resume the consumer
+    ///
     /// # Example
     /// ```
     /// use simple_kafka::{PausableConsumer};
     ///
-    /// let consumer = PausableConsumer::from("group_id", "localhost:9092");
+    /// let (consumer, paused) = PausableConsumer::from("group_id", "localhost:9092").unwrap();
     /// ```
-    pub fn from(group_id: &str, bootstrap_servers: &str) -> Self {
-        let consumer: StreamConsumer = ClientConfig::new()
+    pub fn from(
+        group_id: &str,
+        bootstrap_servers: &str,
+    ) -> Result<(Self, Arc<Mutex<bool>>), SimpleKafkaError> {
+        let consumer = ClientConfig::new()
             .set("group.id", group_id)
             .set("bootstrap.servers", bootstrap_servers)
             .set("enable.partition.eof", "false")
             .set("session.timeout.ms", "6000")
             .set("enable.auto.commit", "true")
-            .create()
-            .expect("Consumer creation failed");
-        PausableConsumer {
+            .create::<StreamConsumer>();
+
+        if let Err(error) = consumer {
+            return Err(SimpleKafkaError::KafkaError(error));
+        }
+
+        let is_runnig = Arc::new(Mutex::new(true));
+        let consumer = consumer.unwrap();
+        let pausable_consumer = PausableConsumer {
             consumer,
             topics_map: HashMap::new(),
-            is_runnig: Arc::new(Mutex::new(true)),
-        }
+            is_runnig: is_runnig.clone(),
+        };
+
+        Ok((pausable_consumer, is_runnig))
     }
 
     ///
     /// Creates a new PausedConsumer from consumer options
     /// # Arguments
     /// * `options` - A ConsumerOptions struct that holds the consumer options
+    ///
+    /// # Returns
+    /// A tuple of PausableConsumer and a Arc<Mutex<bool>>. The Arc<Mutex<bool>> is used to pause and resume the consumer
     ///
     /// # Example
     /// ```
@@ -139,9 +161,11 @@ where
     ///     enable_auto_commit: true,
     ///     enable_partition_eof: false,
     /// };
-    /// let consumer = PausableConsumer::with_options(options);
+    /// let consumer = PausableConsumer::with_options(options)?;
     /// ```
-    pub fn with_options(options: ConsumerOptiopns) -> Self {
+    pub fn with_options(
+        options: ConsumerOptiopns,
+    ) -> Result<(Self, Arc<Mutex<bool>>), SimpleKafkaError> {
         let enable_partition_eof = match options.enable_partition_eof {
             true => "true",
             false => "false",
@@ -151,19 +175,31 @@ where
             true => "true",
             false => "false",
         };
-        let consumer: StreamConsumer = ClientConfig::new()
+        let mut binding = ClientConfig::new();
+        let consumer = binding
             .set("group.id", options.group_id.as_str())
             .set("bootstrap.servers", options.bootstrap_servers.as_str())
             .set("enable.partition.eof", enable_partition_eof)
             .set("session.timeout.ms", options.session_timeout_ms.as_str())
-            .set("enable.auto.commit", enable_auto_commit)
-            .create()
-            .expect("Consumer creation failed");
-        PausableConsumer {
+            .set("enable.auto.commit", enable_auto_commit);
+
+        options.other_options.iter().for_each(|(key, value)| {
+            consumer.set(*key, *value);
+        });
+
+        let consumer = consumer.create::<StreamConsumer>();
+        if let Err(error) = consumer {
+            return Err(SimpleKafkaError::KafkaError(error));
+        }
+
+        let is_runnig = Arc::new(Mutex::new(true));
+        let consumer = consumer.unwrap();
+        let pausable_consumer = PausableConsumer {
             consumer,
             topics_map: HashMap::new(),
-            is_runnig: Arc::new(Mutex::new(true)),
-        }
+            is_runnig: is_runnig.clone(),
+        };
+        Ok((pausable_consumer, is_runnig))
     }
 
     /// FIXME: Not ready yet
@@ -262,22 +298,27 @@ where
     /// let handler_1 = | data: Data, metadata: Metadata| async move {
     ///     println!("Handler One ::: data: {:?}, metadata: {:?}", data, metadata);
     /// };
-    /// consumer.add("topic_1".to_string(), handler_1);
-    /// consumer.subscribe().await;
+    /// consumer.subscribe_to_topic("topic_1".to_string(), handler_1).await.unwrap();
     /// ```
-    pub async fn subscribe_to_topic<H>(&mut self, topic: String, handler: H)
+    pub async fn subscribe_to_topic<H>(
+        &mut self,
+        topic: &str,
+        handler: H,
+    ) -> Result<(), SimpleKafkaError>
     where
         H: Fn(T, Metadata) -> F,
     {
-        self.consumer
-            .subscribe(&[topic.as_str()])
-            .expect("Can't subscribe to specified topic");
+        let subscribe = self.consumer.subscribe(&[topic]);
+        if let Err(error) = subscribe {
+            return Err(SimpleKafkaError::KafkaError(error));
+        }
 
         loop {
             let is_runnig = self.is_runnig.lock().await;
             debug!("Subscriber is running: {:?}", *is_runnig);
-            if !(*is_runnig) {
-                debug!("Subscriber is stopped");
+            if !*is_runnig {
+                drop(is_runnig);
+                debug!("Subscriber is apused");
                 tokio::time::sleep(Duration::from_secs(10)).await;
                 continue;
             }
@@ -293,8 +334,22 @@ where
     }
 
     ///
-    /// Pause the consumer. Consumer will not be disconnect, will not request new messages
+    /// Pause the consumer. Consumer  will not request new messages but will keep the connection to the broker alive
+    /// This is useful when you want to pause the consumer for a while and resume it later without having to reconnect to the broker
     ///
+    /// # Example
+    /// ```
+    /// use simple_kafka::{Consumer};
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let (mut consumer, is_runnig)  = PausableConsumer::from("group_id", "localhost:9092").unwrap();
+    ///     let handler = consumer.subscribe_to_topic("topic".to_string(), |data: Data, medatad: Metadata| async move {
+    ///         info!("data: {:?}, metadata: {:?}", data, medatad);
+    ///     });
+    ///     consumer.pause().await;
+    /// }
+    /// ```
     pub async fn pause(&self) {
         let mut is_runnig = self.is_runnig.lock().await;
         *is_runnig = false;
@@ -302,6 +357,21 @@ where
 
     ///
     /// Resume the consumer
+    ///
+    /// # Example
+    /// ```
+    /// use simple_kafka::{Consumer};
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let (mut consumer, is_runnig)  = PausableConsumer::from("group_id", "localhost:9092").unwrap();
+    ///     let handler = consumer.subscribe_to_topic("topic".to_string(), |data: Data, medatad: Metadata| async move {
+    ///         info!("data: {:?}, metadata: {:?}", data, medatad);
+    ///     });
+    ///     consumer.pause().await;
+    ///     consumer.resume().await;
+    /// }
+    /// ```
     ///
     pub async fn resume(&self) {
         let mut is_runnig = self.is_runnig.lock().await;
@@ -323,21 +393,25 @@ where
     /// # Example
     /// ```
     /// use simple_kafka::{Consumer};
-    /// let consumer = Consumer::from("group_id", "localhost:9092");
+    /// let consumer = Consumer::from("group_id", "localhost:9092").unwrap();
     /// ```
-    pub fn from(group_id: &str, bootstrap_servers: &str) -> Self {
-        let consumer: StreamConsumer = ClientConfig::new()
+    pub fn from(group_id: &str, bootstrap_servers: &str) -> Result<Self, SimpleKafkaError> {
+        let consumer = ClientConfig::new()
             .set("group.id", group_id)
             .set("bootstrap.servers", bootstrap_servers)
             .set("enable.partition.eof", "false")
             .set("session.timeout.ms", "6000")
             .set("enable.auto.commit", "true")
-            .create()
-            .expect("Consumer creation failed");
-        Consumer {
+            .create::<StreamConsumer>();
+
+        if let Err(error) = consumer {
+            return Err(SimpleKafkaError::KafkaError(error));
+        }
+        let consumer = consumer.unwrap();
+        Ok(Consumer {
             consumer,
             topics_map: HashMap::new(),
-        }
+        })
     }
 
     ///
@@ -356,9 +430,9 @@ where
     ///     enable_auto_commit: true,
     ///     enable_partition_eof: false,
     /// };
-    /// let consumer = Consumer::with_options(options);
+    /// let consumer = Consumer::with_options(options).unwrap();
     /// ```
-    pub fn with_options(options: ConsumerOptiopns) -> Self {
+    pub fn with_options(options: ConsumerOptiopns) -> Result<Self, SimpleKafkaError> {
         let enable_partition_eof = match options.enable_partition_eof {
             true => "true",
             false => "false",
@@ -368,18 +442,22 @@ where
             true => "true",
             false => "false",
         };
-        let consumer: StreamConsumer = ClientConfig::new()
+        let consumer = ClientConfig::new()
             .set("group.id", options.group_id.as_str())
             .set("bootstrap.servers", options.bootstrap_servers.as_str())
             .set("enable.partition.eof", enable_partition_eof)
             .set("session.timeout.ms", options.session_timeout_ms.as_str())
             .set("enable.auto.commit", enable_auto_commit)
-            .create()
-            .expect("Consumer creation failed");
-        Consumer {
+            .create::<StreamConsumer>();
+
+        if let Err(error) = consumer {
+            return Err(SimpleKafkaError::KafkaError(error));
+        }
+        let consumer = consumer.unwrap();
+        Ok(Consumer {
             consumer,
             topics_map: HashMap::new(),
-        }
+        })
     }
 
     /// FIXME: Not ready yet
@@ -472,12 +550,12 @@ where
     /// });
     /// handler.await;
     /// ```
-    pub async fn subscribe_to_topic<H>(&mut self, topic: String, handler: H)
+    pub async fn subscribe_to_topic<H>(&mut self, topic: &str, handler: H)
     where
         H: Fn(T, Metadata) -> F,
     {
         self.consumer
-            .subscribe(&[topic.as_str()])
+            .subscribe(&[topic])
             .expect("Can't subscribe to specified topic");
 
         loop {
@@ -587,24 +665,26 @@ mod tests {
 
     #[tokio::test]
     async fn create_consumer_test() {
-        let mut consumer = Consumer::from("group_id", "localhost:9092");
-        let handler = consumer.subscribe_to_topic(
-            "topic".to_string(),
-            |data: Data, medatad: Metadata| async move {
+        let mut consumer = Consumer::from("group_id", "localhost:9092").unwrap();
+        let handler =
+            consumer.subscribe_to_topic("topic", |data: Data, medatad: Metadata| async move {
                 info!("data: {:?}, metadata: {:?}", data, medatad);
-            },
-        );
+            });
         handler.await;
     }
 
     #[tokio::test]
     async fn create_pausable_consumer_test() {
-        let mut consumer = PausableConsumer::from("group_id", "localhost:9092");
+        let (mut consumer, is_runnit) =
+            PausableConsumer::from("group_id", "localhost:9092").unwrap();
         let handler_1 = Box::new(|data: Data, metadata: Metadata| async move {
             println!("Handler One ::: data: {:?}, metadata: {:?}", data, metadata);
         });
 
-        consumer.add("topic_1".to_string(), handler_1);
+        consumer
+            .subscribe_to_topic("topic", handler_1)
+            .await
+            .unwrap();
     }
 
     #[derive(Serialize, Deserialize, Debug)]
