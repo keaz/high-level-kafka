@@ -63,7 +63,7 @@ impl<'a> ConsumerOptiopns<'a> {
     /// ```
     /// use simple_kafka::ConsumerOptiopns;
     ///
-    /// let consumer_options = ConsumerOptiopns::from("localhost:9092".to_string(), "group_id".to_string(), "5000".to_string(), true, true);
+    /// let consumer_options = ConsumerOptiopns::from("localhost:9092".to_string(), "group_id".to_string(), "5000".to_string(), true, true, HashMap::new());
     /// ```
     pub fn from(
         bootstrap_servers: String,

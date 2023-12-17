@@ -3,7 +3,13 @@ use std::collections::HashMap;
 
 #[tokio::main]
 async fn main() {
-    let publisher = publisher::KafkaProducer::from("localhost:9092").unwrap();
+    let producer_options = publisher::ProducerOptiopns::from(
+        "localhost:9092".to_string(),
+        "5000".to_string(),
+        5,
+        HashMap::new(),
+    );
+    let publisher = publisher::KafkaProducer::with_options(producer_options).unwrap();
     let data = Data {
         attra_one: "one".to_string(),
         attra_two: 2,

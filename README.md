@@ -19,7 +19,13 @@ cargo add high-level-kafka
 ```rust
 #[tokio::main]
 async fn main() -> Result<()>{
-    let publisher = KafkaProducer::from("localhost:9092");
+    let producer_options = publisher::ProducerOptiopns::from(
+        "localhost:9092".to_string(),
+        "5000".to_string(),
+        5,
+        HashMap::new(),
+    );
+    let publisher = publisher::KafkaProducer::with_options(producer_options).unwrap();
     let data  = Data {
         attra_one: "123".to_string(),
         attra_two: 12,

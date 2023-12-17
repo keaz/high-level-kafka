@@ -37,6 +37,46 @@ impl<T: serde::Serialize + Debug> Message<T> {
 }
 
 ///
+/// Configuration options for the producer
+///
+pub struct ProducerOptiopns<'a> {
+    bootstrap_servers: String,
+    message_timeout_ms: String,
+    queue_timeout_secs: u64 ,
+    other_options: HashMap<&'a str, &'a str>,
+}
+
+impl<'a> ProducerOptiopns<'a> {
+    ///
+    /// Creates a new ConsumerOptiopns
+    /// # Arguments
+    /// * `bootstrap_servers` - Comma separated bootstrap servers
+    /// * `message_timeout_ms` - Message timeout in milliseconds
+    /// * `queue_timeout_secs` - Queue timeout in seconds
+    /// * `other_options` - A HashMap that holds other options that should be used to create the consumer
+    ///
+    /// # Example
+    /// ```
+    /// use simple_kafka::ProducerOptiopns;
+    ///
+    /// let consumer_options = ProducerOptiopns::from("localhost:9092".to_string(), "5000".to_string(),5 HashMap::new());
+    /// ```
+    pub fn from(
+        bootstrap_servers: String,
+        message_timeout_ms: String,
+        queue_timeout_secs: u64 ,
+        other_options: HashMap<&'a str, &'a str>,
+    ) -> Self {
+        ProducerOptiopns {
+            bootstrap_servers,
+            message_timeout_ms,
+            queue_timeout_secs,
+            other_options,
+        }
+    }
+}
+
+///
 /// A Producer that can be use to publish messages to kafka
 ///
 ///
@@ -51,6 +91,7 @@ impl KafkaProducer {
     ///
     /// # Arguments
     /// * `bootstrap_servers` - Comma separated bootstrap servers
+    /// * `queue_timeout_secs` - Queue timeout in seconds
     ///
     /// # Returns
     /// * `KafkaProducer` - A KafkaProducer that can be used to publish messages to kafka
@@ -62,7 +103,7 @@ impl KafkaProducer {
     ///
     /// let producer = KafkaProducer::from("localhost:9092").unwrap();
     /// ```
-    pub fn from(bootstrap_servers: &str) -> Result<Self, SimpleKafkaError> {
+    pub fn from(bootstrap_servers: &str, queue_timeout_secs: u64) -> Result<Self, SimpleKafkaError> {
         let producer = ClientConfig::new()
             .set("bootstrap.servers", bootstrap_servers)
             .set("message.timeout.ms", "5000")
@@ -76,7 +117,35 @@ impl KafkaProducer {
 
         Ok(KafkaProducer {
             producer,
-            duration_secs: Duration::from_secs(10),
+            duration_secs: Duration::from_secs(queue_timeout_secs),
+        })
+    }
+
+    pub fn with_options(
+        producer_options: ProducerOptiopns,
+    ) -> Result<Self, SimpleKafkaError> {
+        let mut config = ClientConfig::new();
+        config.set("bootstrap.servers", producer_options.bootstrap_servers.as_str());
+        config.set(
+            "message.timeout.ms",
+            producer_options.message_timeout_ms.as_str(),
+        );
+
+        producer_options.other_options.iter().for_each(|(key, value)| {
+            config.set(*key, *value);
+        });
+
+        let producer = config.create::<FutureProducer>();
+
+        if let Err(error) = producer {
+            return Err(SimpleKafkaError::KafkaError(error));
+        }
+
+        let producer = producer.unwrap();
+
+        Ok(KafkaProducer {
+            producer,
+            duration_secs: Duration::from_secs(producer_options.queue_timeout_secs),
         })
     }
 
@@ -148,7 +217,7 @@ mod tests {
 
     #[tokio::test]
     async fn publish_message_test() {
-        let publisher = KafkaProducer::from("localhost:9092").unwrap();
+        let publisher = KafkaProducer::from("localhost:9092",10).unwrap();
         let data = Data {
             attra_one: "123".to_string(),
             attra_two: 12,
