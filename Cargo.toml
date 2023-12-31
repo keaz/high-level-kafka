@@ -5,8 +5,8 @@ description = "High Level Kafka client for Rust"
 license = "MIT/Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/keaz/high-level-kafka"
-keywords = ["kafka", "client", "rdkafka", "async","high-level"]
-version = "0.2.3"
+keywords = ["kafka", "client", "rdkafka", "async", "high-level"]
+version = "0.2.4"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -14,7 +14,31 @@ edition = "2021"
 [dependencies]
 futures = "0.3.28"
 log = "0.4.20"
-rdkafka = {version = "0.36.0"}
+rdkafka = { version = "0.36.0" }
 serde = "1.0.192"
 serde_json = "1.0.108"
-tokio = { version = "1.34.0", features = ["macros","rt-multi-thread","sync"] }
+tokio = { version = "1.34.0", features = ["rt", "time", "sync"] }
+
+[features]
+default = ["rdkafka/default"]
+native-runtime = ["rdkafka/naive-runtime"]
+cmake-build = ["rdkafka/cmake-build"]
+cmake_build = ["rdkafka/cmake_build"]
+dynamic-linking = ["rdkafka/dynamic-linking"]
+dynamic_linking = ["rdkafka/dynamic_linking"]
+ssl = ["rdkafka/ssl"]
+ssl-vendored = ["rdkafka/ssl-vendored"]
+gssapi = ["rdkafka/gssapi"]
+gssapi-vendored = ["rdkafka/gssapi-vendored"]
+sasl = ["rdkafka/sasl"]
+libz = ["rdkafka/libz"]
+libz-static = ["rdkafka/libz-static"]
+curl = ["rdkafka/curl"]
+curl-static = ["rdkafka/curl-static"]
+zstd = ["rdkafka/zstd"]
+zstd-pkg-config = ["rdkafka/zstd-pkg-config"]
+external-lz4 = ["rdkafka/external-lz4"]
+external_lz4 = ["rdkafka/external_lz4"]
+
+[dev-dependencies]
+tokio = { version = "1.34.0", features = ["macros", "rt-multi-thread", "time"] }

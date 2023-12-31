@@ -675,7 +675,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_pausable_consumer_test() {
-        let (mut consumer, is_runnit) =
+        let (mut consumer, _is_runnit) =
             PausableConsumer::from("group_id", "localhost:9092").unwrap();
         let handler_1 = Box::new(|data: Data, metadata: Metadata| async move {
             println!("Handler One ::: data: {:?}, metadata: {:?}", data, metadata);
