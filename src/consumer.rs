@@ -10,7 +10,7 @@ use rdkafka::{
 };
 use tokio::sync::Mutex;
 
-use crate::SimpleKafkaError;
+use crate::{KafkaError as Error, KafkaResult, Metadata};
 
 ///
 /// A Consumer that can be used to consume messages from kafka and has the ability to pause and resume
@@ -84,17 +84,6 @@ impl<'a> ConsumerOptiopns<'a> {
     }
 }
 
-///
-/// Metadata for a consumed message
-///
-#[derive(Debug)]
-pub struct Metadata {
-    pub topic: String,
-    pub partition: i32,
-    pub offset: i64,
-    pub headers: HashMap<String, String>,
-}
-
 impl<T, F> PausableConsumer<T, F>
 where
     T: for<'a> serde::Deserialize<'a>,
@@ -118,7 +107,7 @@ where
     pub fn from(
         group_id: &str,
         bootstrap_servers: &str,
-    ) -> Result<(Self, Arc<Mutex<bool>>), SimpleKafkaError> {
+    ) -> Result<(Self, Arc<Mutex<bool>>), Error> {
         let consumer = ClientConfig::new()
             .set("group.id", group_id)
             .set("bootstrap.servers", bootstrap_servers)
@@ -128,7 +117,7 @@ where
             .create::<StreamConsumer>();
 
         if let Err(error) = consumer {
-            return Err(SimpleKafkaError::KafkaError(error));
+            return Err(Error::Kafka(error));
         }
 
         let is_runnig = Arc::new(Mutex::new(true));
@@ -163,9 +152,7 @@ where
     /// };
     /// let consumer = PausableConsumer::with_options(options)?;
     /// ```
-    pub fn with_options(
-        options: ConsumerOptiopns,
-    ) -> Result<(Self, Arc<Mutex<bool>>), SimpleKafkaError> {
+    pub fn with_options(options: ConsumerOptiopns) -> Result<(Self, Arc<Mutex<bool>>), Error> {
         let enable_partition_eof = match options.enable_partition_eof {
             true => "true",
             false => "false",
@@ -189,7 +176,7 @@ where
 
         let consumer = consumer.create::<StreamConsumer>();
         if let Err(error) = consumer {
-            return Err(SimpleKafkaError::KafkaError(error));
+            return Err(Error::Kafka(error));
         }
 
         let is_runnig = Arc::new(Mutex::new(true));
@@ -300,17 +287,13 @@ where
     /// };
     /// consumer.subscribe_to_topic("topic_1".to_string(), handler_1).await.unwrap();
     /// ```
-    pub async fn subscribe_to_topic<H>(
-        &mut self,
-        topic: &str,
-        handler: H,
-    ) -> Result<(), SimpleKafkaError>
+    pub async fn subscribe_to_topic<H>(&mut self, topic: &str, handler: H) -> Result<(), Error>
     where
-        H: Fn(T, Metadata) -> F,
+        H: Fn(KafkaResult<T>) -> F,
     {
         let subscribe = self.consumer.subscribe(&[topic]);
         if let Err(error) = subscribe {
-            return Err(SimpleKafkaError::KafkaError(error));
+            return Err(Error::Kafka(error));
         }
 
         loop {
@@ -395,7 +378,7 @@ where
     /// use simple_kafka::{Consumer};
     /// let consumer = Consumer::from("group_id", "localhost:9092").unwrap();
     /// ```
-    pub fn from(group_id: &str, bootstrap_servers: &str) -> Result<Self, SimpleKafkaError> {
+    pub fn from(group_id: &str, bootstrap_servers: &str) -> Result<Self, Error> {
         let consumer = ClientConfig::new()
             .set("group.id", group_id)
             .set("bootstrap.servers", bootstrap_servers)
@@ -405,7 +388,7 @@ where
             .create::<StreamConsumer>();
 
         if let Err(error) = consumer {
-            return Err(SimpleKafkaError::KafkaError(error));
+            return Err(Error::Kafka(error));
         }
         let consumer = consumer.unwrap();
         Ok(Consumer {
@@ -432,7 +415,7 @@ where
     /// };
     /// let consumer = Consumer::with_options(options).unwrap();
     /// ```
-    pub fn with_options(options: ConsumerOptiopns) -> Result<Self, SimpleKafkaError> {
+    pub fn with_options(options: ConsumerOptiopns) -> Result<Self, Error> {
         let enable_partition_eof = match options.enable_partition_eof {
             true => "true",
             false => "false",
@@ -451,7 +434,7 @@ where
             .create::<StreamConsumer>();
 
         if let Err(error) = consumer {
-            return Err(SimpleKafkaError::KafkaError(error));
+            return Err(Error::Kafka(error));
         }
         let consumer = consumer.unwrap();
         Ok(Consumer {
@@ -552,7 +535,7 @@ where
     /// ```
     pub async fn subscribe_to_topic<H>(&mut self, topic: &str, handler: H)
     where
-        H: Fn(T, Metadata) -> F,
+        H: Fn(KafkaResult<T>) -> F,
     {
         self.consumer
             .subscribe(&[topic])
@@ -564,7 +547,9 @@ where
                     let owned_message = message.detach();
                     single_handle_message(owned_message, &handler).await;
                 }
-                Err(error) => handle_error(error).await,
+                Err(error) => {
+                    handler(KafkaResult::Err(Error::Kafka(error))).await;
+                }
             };
         }
     }
@@ -590,19 +575,24 @@ async fn handle_message<F, T>(
         offset,
         headers,
     };
-    let message = String::from_utf8_lossy(payload);
-    let message: T = serde_json::from_str(&message).unwrap();
+
+    let message: T = serde_json::from_slice(payload).unwrap();
     handler(message, metadata).await;
 }
 
 async fn single_handle_message<F, T>(
     owned_message: OwnedMessage,
-    handler: &impl Fn(T, Metadata) -> F,
+    handler: &impl Fn(KafkaResult<T>) -> F,
 ) where
     F: Future<Output = ()> + Send + Sync + 'static,
     T: for<'a> serde::Deserialize<'a>,
 {
-    let payload = owned_message.payload().unwrap();
+    let payload = owned_message.payload();
+    let Some(payload) = payload else {
+        handler(KafkaResult::Ok(None)).await;
+        return;
+    };
+
     let topic = owned_message.topic().to_string();
     let partition = owned_message.partition();
     let offset = owned_message.offset();
@@ -614,9 +604,16 @@ async fn single_handle_message<F, T>(
         offset,
         headers,
     };
-    let message = String::from_utf8_lossy(payload);
-    let message: T = serde_json::from_str(&message).unwrap();
-    handler(message, metadata).await;
+
+    let message = serde_json::from_slice::<T>(payload);
+    match message {
+        Ok(message) => {
+            handler(KafkaResult::Ok(Some((message, metadata)))).await;
+        }
+        Err(err) => {
+            handler(KafkaResult::Err(Error::Serde(err))).await;
+        }
+    }
 }
 
 async fn handle_error(error: KafkaError) {
@@ -667,8 +664,11 @@ mod tests {
     async fn create_consumer_test() {
         let mut consumer = Consumer::from("group_id", "localhost:9092").unwrap();
         let handler =
-            consumer.subscribe_to_topic("topic", |data: Data, medatad: Metadata| async move {
-                info!("data: {:?}, metadata: {:?}", data, medatad);
+            consumer.subscribe_to_topic("topic", |result: KafkaResult<Data>| async move {
+                if let KafkaResult::Ok(Some((data, metadata))) = result {
+                    info!("data: {:?}, metadata: {:?}", data, metadata);
+                    return;
+                }
             });
         handler.await;
     }
@@ -677,8 +677,11 @@ mod tests {
     async fn create_pausable_consumer_test() {
         let (mut consumer, _is_runnit) =
             PausableConsumer::from("group_id", "localhost:9092").unwrap();
-        let handler_1 = Box::new(|data: Data, metadata: Metadata| async move {
-            println!("Handler One ::: data: {:?}, metadata: {:?}", data, metadata);
+        let handler_1 = Box::new(|result: KafkaResult<Data>| async move {
+            if let KafkaResult::Ok(Some((data, metadata))) = result {
+                println!("Handler One ::: data: {:?}, metadata: {:?}", data, metadata);
+                return;
+            }
         });
 
         consumer

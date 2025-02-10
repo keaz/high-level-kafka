@@ -1,0 +1,35 @@
+name: Publish to crates.io
+
+on:
+  push:
+    branches:
+      - 'main'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Step 3: Install Rust
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+
+      # Step 4: Build the Rust project
+      - name: Build
+        run: cargo build --verbose
+
+      # # Step 5: Run unit tests
+      # - name: Run tests
+      #   run: cargo test --verbose
+
+      - name: Deploy to crates.io
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}

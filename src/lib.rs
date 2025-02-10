@@ -10,19 +10,41 @@
 //! * [ ] Streams
 //!
 
+use std::collections::HashMap;
+
+use thiserror::Error;
+
 pub mod consumer;
 pub mod publisher;
 
 extern crate rdkafka;
-extern crate serde_json;
 extern crate tokio;
+
+///
+/// Metadata for a consumed message
+///
+#[derive(Debug)]
+pub struct Metadata {
+    pub topic: String,
+    pub partition: i32,
+    pub offset: i64,
+    pub headers: HashMap<String, String>,
+}
 
 /// Error type for the crate
 ///
-#[derive(Debug)]
-pub enum SimpleKafkaError {
+#[derive(Debug, Error)]
+pub enum KafkaError {
     /// Wrapper for rd_kafka errors
-    KafkaError(rdkafka::error::KafkaError),
+    #[error("Kafka error: {0}")]
+    Kafka(rdkafka::error::KafkaError),
     /// Wrapper for serde_json errors
-    SerdeError(serde_json::Error),
+    #[error("Serde error: {0}")]
+    Serde(serde_json::Error),
+}
+
+/// Result type for the crate
+pub enum KafkaResult<T> {
+    Ok(Option<(T, Metadata)>),
+    Err(KafkaError),
 }

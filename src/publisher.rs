@@ -7,7 +7,7 @@ use rdkafka::{
     ClientConfig,
 };
 
-use crate::SimpleKafkaError;
+use crate::KafkaError;
 
 #[derive(Debug)]
 pub struct Message<T: serde::Serialize + Debug> {
@@ -42,7 +42,7 @@ impl<T: serde::Serialize + Debug> Message<T> {
 pub struct ProducerOptiopns<'a> {
     bootstrap_servers: String,
     message_timeout_ms: String,
-    queue_timeout_secs: u64 ,
+    queue_timeout_secs: u64,
     other_options: HashMap<&'a str, &'a str>,
 }
 
@@ -64,7 +64,7 @@ impl<'a> ProducerOptiopns<'a> {
     pub fn from(
         bootstrap_servers: String,
         message_timeout_ms: String,
-        queue_timeout_secs: u64 ,
+        queue_timeout_secs: u64,
         other_options: HashMap<&'a str, &'a str>,
     ) -> Self {
         ProducerOptiopns {
@@ -103,14 +103,14 @@ impl KafkaProducer {
     ///
     /// let producer = KafkaProducer::from("localhost:9092").unwrap();
     /// ```
-    pub fn from(bootstrap_servers: &str, queue_timeout_secs: u64) -> Result<Self, SimpleKafkaError> {
+    pub fn from(bootstrap_servers: &str, queue_timeout_secs: u64) -> Result<Self, KafkaError> {
         let producer = ClientConfig::new()
             .set("bootstrap.servers", bootstrap_servers)
             .set("message.timeout.ms", "5000")
             .create::<FutureProducer>();
 
         if let Err(error) = producer {
-            return Err(SimpleKafkaError::KafkaError(error));
+            return Err(KafkaError::Kafka(error));
         }
 
         let producer = producer.unwrap();
@@ -121,24 +121,28 @@ impl KafkaProducer {
         })
     }
 
-    pub fn with_options(
-        producer_options: ProducerOptiopns,
-    ) -> Result<Self, SimpleKafkaError> {
+    pub fn with_options(producer_options: ProducerOptiopns) -> Result<Self, KafkaError> {
         let mut config = ClientConfig::new();
-        config.set("bootstrap.servers", producer_options.bootstrap_servers.as_str());
+        config.set(
+            "bootstrap.servers",
+            producer_options.bootstrap_servers.as_str(),
+        );
         config.set(
             "message.timeout.ms",
             producer_options.message_timeout_ms.as_str(),
         );
 
-        producer_options.other_options.iter().for_each(|(key, value)| {
-            config.set(*key, *value);
-        });
+        producer_options
+            .other_options
+            .iter()
+            .for_each(|(key, value)| {
+                config.set(*key, *value);
+            });
 
         let producer = config.create::<FutureProducer>();
 
         if let Err(error) = producer {
-            return Err(SimpleKafkaError::KafkaError(error));
+            return Err(KafkaError::Kafka(error));
         }
 
         let producer = producer.unwrap();
@@ -176,7 +180,7 @@ impl KafkaProducer {
     pub async fn produce<T: serde::Serialize + Debug>(
         &self,
         message: Message<T>,
-    ) -> Result<(), SimpleKafkaError> {
+    ) -> Result<(), KafkaError> {
         let mut builder = FutureRecord::to(&message.topic).key(message.key.as_str());
         let mut kafka_headers = OwnedHeaders::new();
         for (header, value) in message.headers.iter() {
@@ -188,9 +192,9 @@ impl KafkaProducer {
 
         builder = builder.headers(kafka_headers);
 
-        let restult = serde_json::to_string(&message.data);
+        let restult = serde_json::to_vec(&message.data);
         if let Err(error) = restult {
-            return Err(SimpleKafkaError::SerdeError(error));
+            return Err(KafkaError::Serde(error));
         }
 
         let serialized = restult.unwrap();
@@ -202,7 +206,7 @@ impl KafkaProducer {
 
         if let Err((error, _)) = publish_result {
             error!("Unable to send message {:?}, error {}", message, error);
-            return Err(SimpleKafkaError::KafkaError(error));
+            return Err(KafkaError::Kafka(error));
         }
 
         Ok(())
@@ -217,7 +221,7 @@ mod tests {
 
     #[tokio::test]
     async fn publish_message_test() {
-        let publisher = KafkaProducer::from("localhost:9092",10).unwrap();
+        let publisher = KafkaProducer::from("localhost:9092", 10).unwrap();
         let data = Data {
             attra_one: "123".to_string(),
             attra_two: 12,
